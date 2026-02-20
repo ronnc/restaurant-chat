@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thai Basil Restaurant</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Georgia, serif; color: #333; }
+    .hero {
+      background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)),
+                  url('https://images.unsplash.com/photo-1562565652-a0d8f0c59eb4?w=1200&q=80');
+      background-size: cover;
+      background-position: center;
+      height: 70vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      text-align: center;
+    }
+    .hero h1 { font-size: 48px; margin-bottom: 16px; }
+    .hero p { font-size: 20px; opacity: 0.9; }
+    .content { max-width: 800px; margin: 60px auto; padding: 0 20px; text-align: center; }
+    .content h2 { font-size: 28px; margin-bottom: 16px; color: #e65100; }
+    .content p { font-size: 18px; line-height: 1.7; color: #555; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>🍜 Thai Basil</h1>
+    <p>Authentic Thai cuisine in the heart of Melbourne</p>
+  </div>
+  <div class="content">
+    <h2>Order Online</h2>
+    <p>Click the chat icon in the bottom right to place your order. Our AI assistant will help you pick the perfect meal!</p>
+  </div>
+
+  <!-- This is all a restaurant needs to add -->
+  <script src="/widget.js" data-restaurant="thai-basil"></script>
+</body>
+</html>
