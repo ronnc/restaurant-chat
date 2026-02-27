@@ -115,11 +115,37 @@
     function addMessage(role, text) {
       const div = document.createElement('div');
       div.className = `msg ${role}`;
-      div.textContent = text;
+      // Strip JSON booking blocks from displayed text
+      const cleaned = text.replace(/```json\s*\n?\s*\{[^}]*"action"\s*:\s*"book"[^}]*\}\s*\n?\s*```/g, '').trim();
+      div.textContent = cleaned;
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
       return div;
     }
+
+    function addBookingConfirmation(result) {
+      const div = document.createElement('div');
+      div.className = 'msg assistant booking-confirmation';
+      if (result.success) {
+        div.innerHTML = `
+          <div style="background:#e8f5e9;border:1px solid #4caf50;border-radius:12px;padding:16px;">
+            <div style="font-size:20px;margin-bottom:8px;">✅ Booking Confirmed!</div>
+            <div style="color:#2e7d32;font-size:14px;">${result.message || 'Your reservation has been made.'}</div>
+            ${result.confirmationCode ? `<div style="margin-top:8px;font-weight:600;">Confirmation: #${result.confirmationCode}</div>` : ''}
+          </div>`;
+      } else {
+        div.innerHTML = `
+          <div style="background:#fbe9e7;border:1px solid #ff5722;border-radius:12px;padding:16px;">
+            <div style="font-size:20px;margin-bottom:8px;">⚠️ Booking Issue</div>
+            <div style="color:#bf360c;font-size:14px;">${result.message || 'Something went wrong with the booking.'}</div>
+          </div>`;
+      }
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // Restaurant booking URL — configure per restaurant
+    const BOOKING_URL = window.RESTAURANT_BOOKING_URL || '';
 
     async function send() {
       const text = inputEl.value.trim();
@@ -141,6 +167,29 @@
         typing.remove();
         if (data.reply) {
           addMessage('assistant', data.reply);
+
+          // If booking details were collected, trigger the booking
+          if (data.bookingPending && BOOKING_URL) {
+            const bookingTyping = addMessage('typing', 'Making your reservation...');
+            try {
+              const bookResp = await fetch('/api/book', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...data.bookingPending, bookingUrl: BOOKING_URL }),
+              });
+              const bookResult = await bookResp.json();
+              bookingTyping.remove();
+              addBookingConfirmation(bookResult);
+            } catch {
+              bookingTyping.remove();
+              addBookingConfirmation({ success: false, message: 'Could not connect to booking service.' });
+            }
+          } else if (data.bookingPending && !BOOKING_URL) {
+            addBookingConfirmation({
+              success: true,
+              message: `Booking details collected for ${data.bookingPending.partySize} guests on ${data.bookingPending.date} at ${data.bookingPending.time}. (No booking URL configured — in production this would auto-book via the restaurant's platform.)`,
+            });
+          }
         } else {
           addMessage('assistant', 'Sorry, something went wrong. Please try again.');
         }

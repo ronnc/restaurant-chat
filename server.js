@@ -2,6 +2,7 @@ import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { makeBooking, detectProvider } from './booking.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -53,9 +54,12 @@ function createProvider(name) {
 const providerName = process.env.LLM_PROVIDER || 'anthropic';
 const provider = createProvider(providerName);
 
-const SYSTEM_PROMPT = `You are a friendly restaurant ordering assistant. You help customers browse the menu and place orders through conversation.
+const SYSTEM_PROMPT = `You are a friendly restaurant assistant. You help customers browse the menu, place orders, and **make reservations** through conversation.
 
-Be concise, warm, and helpful. When a customer wants to order:
+Be concise, warm, and helpful.
+
+## Ordering
+When a customer wants to order:
 1. Help them pick items from the menu
 2. Ask about customisations (spice level, extras, dietary needs)
 3. Confirm quantities
@@ -63,7 +67,28 @@ Be concise, warm, and helpful. When a customer wants to order:
 
 For now, you're a demo — make up a sample Thai restaurant menu with reasonable prices in AUD. Include categories like Mains, Sides, Drinks, Desserts. Keep it authentic.
 
-If a customer asks something unrelated to ordering food, politely redirect them.`;
+## Reservations / Bookings
+When a customer wants to make a reservation or book a table:
+1. Collect ALL of the following details:
+   - **Date** (in YYYY-MM-DD format)
+   - **Time** (in HH:MM 24-hour format)
+   - **Party size** (number of guests)
+   - **Name** (full name)
+   - **Email**
+   - **Phone number**
+   - Any **special requests** (optional)
+2. Ask for missing details conversationally — don't dump a form on them.
+3. Once you have ALL required details, respond with a JSON block on its own line in this exact format:
+
+\`\`\`json
+{"action":"book","date":"YYYY-MM-DD","time":"HH:MM","partySize":N,"name":"...","email":"...","phone":"...","specialRequests":"..."}
+\`\`\`
+
+4. After the JSON block, add a friendly message like "Let me book that for you now! 🍽️"
+
+IMPORTANT: Only output the JSON block when you have ALL required fields (date, time, partySize, name, email, phone). The system will detect this and trigger the booking automatically.
+
+If a customer asks something unrelated to ordering food or making reservations, politely redirect them.`;
 
 // In-memory session store (swap for DB later)
 const sessions = new Map();
@@ -86,10 +111,81 @@ app.post('/api/chat', async (req, res) => {
     const reply = await provider.chat(history, SYSTEM_PROMPT);
     history.push({ role: 'assistant', content: reply });
 
+    // Check if the reply contains a booking action
+    const bookingMatch = reply.match(/```json\s*\n?\s*(\{[^}]*"action"\s*:\s*"book"[^}]*\})\s*\n?\s*```/);
+    if (bookingMatch) {
+      try {
+        const bookingData = JSON.parse(bookingMatch[1]);
+        // Return the reply with booking data attached so the client can trigger /api/book
+        return res.json({
+          reply,
+          bookingPending: {
+            date: bookingData.date,
+            time: bookingData.time,
+            partySize: bookingData.partySize,
+            name: bookingData.name,
+            email: bookingData.email,
+            phone: bookingData.phone,
+            specialRequests: bookingData.specialRequests || '',
+          },
+        });
+      } catch {
+        // JSON parse failed — just return the reply normally
+      }
+    }
+
     res.json({ reply });
   } catch (err) {
     console.error('Chat error:', err.message);
     res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+// --- Booking endpoint ---
+app.post('/api/book', async (req, res) => {
+  try {
+    const { bookingUrl, date, time, partySize, name, email, phone, specialRequests } = req.body;
+
+    // Validate required fields
+    const missing = [];
+    if (!bookingUrl) missing.push('bookingUrl');
+    if (!date) missing.push('date');
+    if (!time) missing.push('time');
+    if (!partySize) missing.push('partySize');
+    if (!name) missing.push('name');
+    if (!email) missing.push('email');
+    if (!phone) missing.push('phone');
+    if (missing.length > 0) {
+      return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
+    }
+
+    // Check if we support this platform
+    const detectedProvider = detectProvider(bookingUrl);
+    if (!detectedProvider) {
+      return res.status(400).json({
+        error: `Unsupported booking platform. Supported: SevenRooms, OpenTable, Resy.`,
+        bookingUrl,
+      });
+    }
+
+    console.log(`[booking] Starting ${detectedProvider.name} booking for ${name} — ${partySize} guests, ${date} ${time}`);
+
+    const result = await makeBooking({
+      bookingUrl,
+      date,
+      time,
+      partySize: Number(partySize),
+      name,
+      email,
+      phone,
+      specialRequests: specialRequests || '',
+    });
+
+    console.log(`[booking] Result:`, result);
+    res.json(result);
+  } catch (err) {
+    console.error('Booking error:', err);
+    res.status(500).json({ success: false, message: 'Internal booking error.' });
   }
 });
 
