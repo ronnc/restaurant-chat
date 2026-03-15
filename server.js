@@ -2,9 +2,21 @@ import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { mkdirSync, appendFileSync } from 'fs';
 import { makeBooking, detectProvider } from './booking.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// --- Transcript logging ---
+const transcriptDir = join(__dirname, 'transcripts');
+mkdirSync(transcriptDir, { recursive: true });
+
+function logTranscript(sessionId, role, content) {
+  const now = new Date();
+  const date = now.toISOString().slice(0, 10);
+  const entry = { ts: now.toISOString(), role, content };
+  appendFileSync(join(transcriptDir, `${date}_${sessionId}.jsonl`), JSON.stringify(entry) + '\n');
+}
 
 const app = express();
 app.use(express.json());
@@ -26,17 +38,18 @@ function createProvider(name) {
       },
     };
   }
-  // TODO: ollama provider
+  // Ollama or chat-client-toy (both OpenAI-compatible)
   if (name === 'ollama') {
-    const baseUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+    const gatewayUrl = process.env.LLM_GATEWAY_URL || 'http://localhost:11434';
     return {
       async chat(messages, systemPrompt) {
-        const resp = await fetch(`${baseUrl}/api/chat`, {
+        const resp = await fetch(`${gatewayUrl}/v1/chat/completions`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({
-            model: process.env.OLLAMA_MODEL || 'llama3',
-            stream: false,
+            model: process.env.OLLAMA_MODEL || 'llama3.1:8b',
             messages: [
               { role: 'system', content: systemPrompt },
               ...messages,
@@ -44,7 +57,7 @@ function createProvider(name) {
           }),
         });
         const data = await resp.json();
-        return data.message.content;
+        return data.choices[0].message.content;
       },
     };
   }
@@ -65,7 +78,7 @@ When a customer wants to order:
 3. Confirm quantities
 4. Summarise the order before confirming
 
-For now, you're a demo — make up a sample Thai restaurant menu with reasonable prices in AUD. Include categories like Mains, Sides, Drinks, Desserts. Keep it authentic.
+Present the menu in markdown table format when asked.
 
 ## Reservations / Bookings
 When a customer wants to make a reservation or book a table:
@@ -106,10 +119,12 @@ app.post('/api/chat', async (req, res) => {
     }
     const history = sessions.get(sessionId);
     history.push({ role: 'user', content: message });
+    logTranscript(sessionId, 'user', message);
 
     // Call LLM
     const reply = await provider.chat(history, SYSTEM_PROMPT);
     history.push({ role: 'assistant', content: reply });
+    logTranscript(sessionId, 'assistant', reply);
 
     // Check if the reply contains a booking action
     const bookingMatch = reply.match(/```json\s*\n?\s*(\{[^}]*"action"\s*:\s*"book"[^}]*\})\s*\n?\s*```/);
@@ -191,6 +206,6 @@ app.post('/api/book', async (req, res) => {
 
 const PORT = process.env.PORT || 3456;
 app.listen(PORT, () => {
-  console.log(`🍜 Restaurant Chat running on http://localhost:${PORT}`);
+  console.log(`🍛 Restaurant Chat running on http://localhost:${PORT}`);
   console.log(`   LLM Provider: ${providerName}`);
 });

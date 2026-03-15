@@ -52,7 +52,7 @@
   // Chat button
   const btn = document.createElement('button');
   btn.id = 'rc-widget-btn';
-  btn.innerHTML = '🍜';
+  btn.innerHTML = '🍛';
   btn.title = 'Chat with us';
   document.body.appendChild(btn);
 
@@ -66,6 +66,6 @@
   btn.addEventListener('click', () => {
     open = !open;
     iframe.style.display = open ? 'block' : 'none';
-    btn.innerHTML = open ? '✕' : '🍜';
+    btn.innerHTML = open ? '✕' : '🍛';
   });
 })();

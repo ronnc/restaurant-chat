@@ -1,2 +1,7 @@
-node_modules/
 .env
+node_modules/
+server.log
+tunnel.log
+server.pid
+tunnel.pid
+transcripts/
