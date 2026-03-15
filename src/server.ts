@@ -1,84 +1,76 @@
 import express from 'express';
-import Anthropic from '@anthropic-ai/sdk';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { mkdirSync, appendFileSync } from 'fs';
 import { makeBooking, detectProvider } from './booking.js';
+import { loadRestaurant } from './restaurant.js';
+import { ProviderFactory } from './llm/index.js';
+import type { ChatMessage, ChatRequest, ChatResponse, BookRequest, RestaurantConfig } from './types.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Project root is one level up from dist/ (or src/ when using tsx)
+const projectRoot = __dirname.endsWith('/dist') || __dirname.endsWith('/src')
+  ? dirname(__dirname)
+  : __dirname;
 
 // --- Transcript logging ---
-const transcriptDir = join(__dirname, 'transcripts');
+const transcriptDir = join(projectRoot, 'transcripts');
 mkdirSync(transcriptDir, { recursive: true });
 
-function logTranscript(sessionId, role, content) {
+function logTranscript(sessionId: string, role: string, content: string): void {
   const now = new Date();
   const date = now.toISOString().slice(0, 10);
   const entry = { ts: now.toISOString(), role, content };
   appendFileSync(join(transcriptDir, `${date}_${sessionId}.jsonl`), JSON.stringify(entry) + '\n');
 }
 
-const app = express();
-app.use(express.json());
-app.use(express.static(join(__dirname, 'public')));
+// --- LLM Provider ---
+const LLM_MODEL = process.env.LLM_MODEL || process.env.OLLAMA_MODEL || 'llama3.1:8b';
+const LLM_PROVIDER = process.env.LLM_PROVIDER; // auto-detect if not set
+const provider = ProviderFactory.create(LLM_MODEL, LLM_PROVIDER);
 
-// --- LLM Provider Abstraction ---
-function createProvider(name) {
-  if (name === 'anthropic') {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    return {
-      async chat(messages, systemPrompt) {
-        const resp = await client.messages.create({
-          model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
-          max_tokens: 1024,
-          system: systemPrompt,
-          messages,
-        });
-        return resp.content[0].text;
-      },
-    };
-  }
-  // Ollama or chat-client-toy (both OpenAI-compatible)
-  if (name === 'ollama') {
-    const gatewayUrl = process.env.LLM_GATEWAY_URL || 'http://localhost:11434';
-    return {
-      async chat(messages, systemPrompt) {
-        const resp = await fetch(`${gatewayUrl}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: process.env.OLLAMA_MODEL || 'llama3.1:8b',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              ...messages,
-            ],
-          }),
-        });
-        const data = await resp.json();
-        return data.choices[0].message.content;
-      },
-    };
-  }
-  throw new Error(`Unknown provider: ${name}`);
+// --- Restaurant context ---
+const restaurantSlug = process.env.RESTAURANT || 'delhi-darbar';
+const restaurant: RestaurantConfig | null = loadRestaurant(restaurantSlug, projectRoot);
+
+if (restaurant) {
+  console.log(`📋 Loaded restaurant: ${restaurant.name} (${restaurantSlug})`);
+} else {
+  console.warn(`⚠️  No restaurant data found for "${restaurantSlug}"`);
 }
 
-const providerName = process.env.LLM_PROVIDER || 'anthropic';
-const provider = createProvider(providerName);
+// --- Build system prompt ---
+function buildSystemPrompt(): string {
+  let prompt = `You are a friendly restaurant assistant for ${restaurant?.name || 'our restaurant'}. You help customers browse the menu, place orders, and make reservations.
 
-const SYSTEM_PROMPT = `You are a friendly restaurant assistant. You help customers browse the menu, place orders, and **make reservations** through conversation.
+Be concise, warm, and helpful.`;
 
-Be concise, warm, and helpful.
+  // Inject restaurant context FIRST so the LLM sees it early
+  if (restaurant) {
+    prompt += `\n\n## Restaurant: ${restaurant.name}`;
+    if (restaurant.cuisine) prompt += `\nCuisine: ${restaurant.cuisine}`;
+    if (restaurant.currency) prompt += `\nCurrency: ${restaurant.currency}`;
+    if (restaurant.tagline) prompt += `\nTagline: ${restaurant.tagline}`;
+    if (restaurant.knowledge) {
+      prompt += `\n\n${restaurant.knowledge}`;
+    }
+  }
+
+  prompt += `
+
+## CRITICAL RULES
+- ONLY use the menu and allergen information provided ABOVE. NEVER make up or invent menu items.
+- If no menu is provided above, tell the customer the menu is not available yet.
+- If allergen info is not available for a dish, say you're not sure and recommend asking staff.
 
 ## Ordering
 When a customer wants to order:
-1. Help them pick items from the menu
+1. Help them pick items from the menu above
 2. Ask about customisations (spice level, extras, dietary needs)
 3. Confirm quantities
 4. Summarise the order before confirming
-
-IMPORTANT: Only use the menu and allergen information provided in the system context. Do NOT make up or generate menu items or allergen data. If no menu is provided, tell the customer the menu is not available yet. If allergen info is not available for a dish, say you're not sure and recommend asking staff. Present the menu in markdown table format when asked.
 
 ## Reservations / Bookings
 When a customer wants to make a reservation or book a table:
@@ -103,36 +95,48 @@ IMPORTANT: Only output the JSON block when you have ALL required fields (date, t
 
 If a customer asks something unrelated to ordering food or making reservations, politely redirect them.`;
 
-// In-memory session store (swap for DB later)
-const sessions = new Map();
+  return prompt;
+}
+
+const SYSTEM_PROMPT = buildSystemPrompt();
+
+// --- Express app ---
+const app = express();
+app.use(express.json());
+app.use(express.static(join(projectRoot, 'public')));
+
+// In-memory session store
+const sessions = new Map<string, ChatMessage[]>();
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { sessionId, message } = req.body;
+    const { sessionId, message } = req.body as ChatRequest;
     if (!sessionId || !message) {
-      return res.status(400).json({ error: 'sessionId and message required' });
+      res.status(400).json({ error: 'sessionId and message required' });
+      return;
     }
 
     // Get or create session history
     if (!sessions.has(sessionId)) {
       sessions.set(sessionId, []);
     }
-    const history = sessions.get(sessionId);
+    const history = sessions.get(sessionId)!;
     history.push({ role: 'user', content: message });
     logTranscript(sessionId, 'user', message);
 
-    // Call LLM
-    const reply = await provider.chat(history, SYSTEM_PROMPT);
+    // Call LLM via provider abstraction
+    const reply = await provider.chat(history, SYSTEM_PROMPT) || 'Sorry, I could not generate a response.';
     history.push({ role: 'assistant', content: reply });
     logTranscript(sessionId, 'assistant', reply);
 
     // Check if the reply contains a booking action
-    const bookingMatch = reply.match(/```json\s*\n?\s*(\{[^}]*"action"\s*:\s*"book"[^}]*\})\s*\n?\s*```/);
+    const bookingMatch = reply.match(
+      /```json\s*\n?\s*(\{[^}]*"action"\s*:\s*"book"[^}]*\})\s*\n?\s*```/
+    );
     if (bookingMatch) {
       try {
         const bookingData = JSON.parse(bookingMatch[1]);
-        // Return the reply with booking data attached so the client can trigger /api/book
-        return res.json({
+        const response: ChatResponse = {
           reply,
           bookingPending: {
             date: bookingData.date,
@@ -143,15 +147,17 @@ app.post('/api/chat', async (req, res) => {
             phone: bookingData.phone,
             specialRequests: bookingData.specialRequests || '',
           },
-        });
+        };
+        res.json(response);
+        return;
       } catch {
         // JSON parse failed — just return the reply normally
       }
     }
 
-    res.json({ reply });
+    res.json({ reply } as ChatResponse);
   } catch (err) {
-    console.error('Chat error:', err.message);
+    console.error('Chat error:', (err as Error).message);
     res.status(500).json({ error: 'Something went wrong' });
   }
 });
@@ -159,10 +165,10 @@ app.post('/api/chat', async (req, res) => {
 // --- Booking endpoint ---
 app.post('/api/book', async (req, res) => {
   try {
-    const { bookingUrl, date, time, partySize, name, email, phone, specialRequests } = req.body;
+    const { bookingUrl, date, time, partySize, name, email, phone, specialRequests } = req.body as BookRequest;
 
     // Validate required fields
-    const missing = [];
+    const missing: string[] = [];
     if (!bookingUrl) missing.push('bookingUrl');
     if (!date) missing.push('date');
     if (!time) missing.push('time');
@@ -171,19 +177,23 @@ app.post('/api/book', async (req, res) => {
     if (!email) missing.push('email');
     if (!phone) missing.push('phone');
     if (missing.length > 0) {
-      return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
+      res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
+      return;
     }
 
     // Check if we support this platform
     const detectedProvider = detectProvider(bookingUrl);
     if (!detectedProvider) {
-      return res.status(400).json({
+      res.status(400).json({
         error: `Unsupported booking platform. Supported: SevenRooms, OpenTable, Resy.`,
         bookingUrl,
       });
+      return;
     }
 
-    console.log(`[booking] Starting ${detectedProvider.name} booking for ${name} — ${partySize} guests, ${date} ${time}`);
+    console.log(
+      `[booking] Starting ${detectedProvider.name} booking for ${name} — ${partySize} guests, ${date} ${time}`
+    );
 
     const result = await makeBooking({
       bookingUrl,
@@ -204,8 +214,11 @@ app.post('/api/book', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3456;
+const PORT = Number(process.env.PORT) || 3456;
 app.listen(PORT, () => {
   console.log(`🍛 Restaurant Chat running on http://localhost:${PORT}`);
-  console.log(`   LLM Provider: ${providerName}`);
+  console.log(`   LLM: ${provider.name} (model: ${LLM_MODEL})`);
+  if (restaurant) {
+    console.log(`   Restaurant: ${restaurant.name}`);
+  }
 });

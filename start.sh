@@ -1,60 +1,43 @@
 #!/bin/bash
 # Start restaurant-chat + Cloudflare tunnel
 # Usage:
-#   ./start.sh                           → Anthropic (Claude)
-#   ./start.sh ollama                    → Ollama direct, default model (llama3.2:3b)
-#   ./start.sh ollama llama3.1:8b        → Ollama direct, specific model
-#   ./start.sh toy                       → chat-client-toy gateway (localhost:8100, start separately)
+#   ./start.sh                              → default (Ollama llama3.1:8b)
+#   ./start.sh llama3.2:3b                  → override model (auto-detect provider)
+#   ./start.sh claude-sonnet-4-20250514              → auto-picks Anthropic
+#   ./start.sh gpt-4o openai                → explicit provider
 cd "$(dirname "$0")"
-
-# Restaurant selection (env var or default)
-export RESTAURANT="${RESTAURANT:-delhi-darbar}"
-
-# Provider selection
-PROVIDER="${1:-anthropic}"
 
 # Load secrets from .env
 if [ -f .env ]; then
   set -a; source .env; set +a
 fi
 
-export OLLAMA_URL=http://localhost:11434
+# Allow model + provider override via CLI args
+if [ -n "$1" ]; then
+  export LLM_MODEL="$1"
+fi
+if [ -n "$2" ]; then
+  export LLM_PROVIDER="$2"
+fi
 
-case "$PROVIDER" in
-  anthropic)
-    export LLM_PROVIDER="anthropic"
-    DISPLAY_NAME="anthropic/claude-sonnet"
-    ;;
-  ollama)
-    export LLM_PROVIDER="ollama"
-    export OLLAMA_MODEL="${2:-llama3.2:3b}"
-    export LLM_GATEWAY_URL="http://localhost:11434"
-    DISPLAY_NAME="ollama/$OLLAMA_MODEL"
-    ;;
-  toy)
-    export LLM_PROVIDER="ollama"
-    export OLLAMA_MODEL="${2:-llama3.1:8b}"
-    export LLM_GATEWAY_URL="http://localhost:8100"
-    DISPLAY_NAME="chat-client-toy/$OLLAMA_MODEL"
-    ;;
-  *)
-    echo "Usage: $0 [anthropic|ollama|toy] [model]"
-    exit 1
-    ;;
-esac
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://192.168.0.30:11434/v1}"
+export LLM_MODEL="${LLM_MODEL:-llama3.1:8b}"
+export RESTAURANT="${RESTAURANT:-delhi-darbar}"
+
+DISPLAY_NAME="${LLM_PROVIDER:+$LLM_PROVIDER/}${LLM_MODEL}"
 
 # Kill existing instances if running
 [ -f server.pid ] && kill "$(cat server.pid)" 2>/dev/null
 [ -f tunnel.pid ] && kill "$(cat tunnel.pid)" 2>/dev/null
 
-# Start server
+# Start server (tsx for dev, or node dist/server.js for prod)
 echo "$(date '+%Y-%m-%d %H:%M:%S') Starting restaurant-chat ($DISPLAY_NAME)" | tee -a server.log
-node server.js >> server.log 2>&1 &
+npx tsx src/server.ts >> server.log 2>&1 &
 echo $! > server.pid
 echo "Server PID $(cat server.pid) — logs → server.log"
 
 # Start Cloudflare tunnel
-sleep 1
+sleep 2
 nohup cloudflared tunnel --url http://localhost:3456 >> tunnel.log 2>&1 &
 echo $! > tunnel.pid
 echo "Tunnel PID $(cat tunnel.pid) — logs → tunnel.log"

@@ -1,5 +1,6 @@
 .env
 node_modules/
+dist/
 server.log
 tunnel.log
 server.pid
