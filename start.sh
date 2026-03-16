@@ -1,7 +1,9 @@
 #!/bin/bash
 # Start restaurant-chat + Cloudflare tunnel
 # Usage:
-#   ./start.sh                              → default (Ollama llama3.1:8b)
+#   ./start.sh                              → default (remote Ollama llama3.1:8b)
+#   ./start.sh --local                      → use local Ollama instead of remote
+#   ./start.sh --local llama3.2:3b          → local Ollama with custom model
 #   ./start.sh llama3.2:3b                  → override model (auto-detect provider)
 #   ./start.sh claude-sonnet-4-20250514              → auto-picks Anthropic
 #   ./start.sh gpt-4o openai                → explicit provider
@@ -12,23 +14,56 @@ if [ -f .env ]; then
   set -a; source .env; set +a
 fi
 
+# Parse --local flag
+USE_LOCAL=false
+ARGS=()
+for arg in "$@"; do
+  if [ "$arg" = "--local" ]; then
+    USE_LOCAL=true
+  else
+    ARGS+=("$arg")
+  fi
+done
+
 # Allow model + provider override via CLI args
-if [ -n "$1" ]; then
-  export LLM_MODEL="$1"
+if [ -n "${ARGS[0]}" ]; then
+  export LLM_MODEL="${ARGS[0]}"
 fi
-if [ -n "$2" ]; then
-  export LLM_PROVIDER="$2"
+if [ -n "${ARGS[1]}" ]; then
+  export LLM_PROVIDER="${ARGS[1]}"
 fi
 
-export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://192.168.0.30:11434/v1}"
+if [ "$USE_LOCAL" = true ]; then
+  export OLLAMA_BASE_URL="http://localhost:11434/v1"
+  # Ensure local Ollama is running
+  if ! pgrep -q ollama; then
+    echo "Starting local Ollama..."
+    ollama serve >> /tmp/ollama-local.log 2>&1 &
+    sleep 3
+  fi
+  # Pull model if not available locally
+  if ! ollama list 2>/dev/null | grep -q "^${LLM_MODEL}"; then
+    echo "Pulling model ${LLM_MODEL}..."
+    ollama pull "${LLM_MODEL}"
+  fi
+else
+  export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://192.168.0.30:11434/v1}"
+fi
 export LLM_MODEL="${LLM_MODEL:-llama3.1:8b}"
 export RESTAURANT="${RESTAURANT:-delhi-darbar}"
 
 DISPLAY_NAME="${LLM_PROVIDER:+$LLM_PROVIDER/}${LLM_MODEL}"
 
-# Kill existing instances if running
+TUNNEL_URL="https://restaurant-chat.chaifamily.com.au"
+
+# Kill existing server if running
 [ -f server.pid ] && kill "$(cat server.pid)" 2>/dev/null
-[ -f tunnel.pid ] && kill "$(cat tunnel.pid)" 2>/dev/null
+
+# Ensure Cloudflare tunnel is running via launchd
+if ! launchctl list com.cloudflare.restaurant-chat &>/dev/null; then
+  echo "Starting Cloudflare tunnel via launchd..."
+  launchctl load ~/Library/LaunchAgents/com.cloudflare.restaurant-chat.plist 2>/dev/null
+fi
 
 # Start server (tsx for dev, or node dist/server.js for prod)
 echo "$(date '+%Y-%m-%d %H:%M:%S') Starting restaurant-chat ($DISPLAY_NAME)" | tee -a server.log
@@ -36,14 +71,7 @@ npx tsx src/server.ts >> server.log 2>&1 &
 echo $! > server.pid
 echo "Server PID $(cat server.pid) — logs → server.log"
 
-# Start Cloudflare tunnel
 sleep 2
-nohup cloudflared tunnel --url http://localhost:3456 >> tunnel.log 2>&1 &
-echo $! > tunnel.pid
-echo "Tunnel PID $(cat tunnel.pid) — logs → tunnel.log"
-echo "Waiting for tunnel URL..."
-sleep 12
-TUNNEL_URL=$(grep -o 'https://[^ ]*trycloudflare.com' tunnel.log | tail -1)
 echo ""
 echo "════════════════════════════════════════════════"
 echo "  🍛 Restaurant Chat is live!"
