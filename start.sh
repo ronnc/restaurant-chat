@@ -38,7 +38,7 @@ if [ "$USE_LOCAL" = true ]; then
   # Ensure local Ollama is running
   if ! pgrep -q ollama; then
     echo "Starting local Ollama..."
-    ollama serve >> /tmp/ollama-local.log 2>&1 &
+    OLLAMA_KEEP_ALIVE=-1 ollama serve >> /tmp/ollama-local.log 2>&1 &
     sleep 3
   fi
   # Pull model if not available locally
@@ -46,6 +46,9 @@ if [ "$USE_LOCAL" = true ]; then
     echo "Pulling model ${LLM_MODEL}..."
     ollama pull "${LLM_MODEL}"
   fi
+  # Preload model into memory (keep_alive=-1 means never unload)
+  echo "Preloading ${LLM_MODEL} into memory..."
+  curl -s http://localhost:11434/api/generate -d "{\"model\":\"${LLM_MODEL}\",\"keep_alive\":-1}" > /dev/null
 else
   export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://192.168.0.30:11434/v1}"
 fi
