@@ -6,6 +6,7 @@ import { makeBooking, detectProvider } from './booking.js';
 import { loadRestaurant } from './restaurant.js';
 import { ProviderFactory } from './llm/index.js';
 import type { ChatMessage, ChatRequest, ChatResponse, BookRequest, RestaurantConfig } from './types.js';
+import { bookingRouter } from './booking/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -104,6 +105,7 @@ const SYSTEM_PROMPT = buildSystemPrompt();
 const app = express();
 app.use(express.json());
 app.use(express.static(join(projectRoot, 'public')));
+app.use(bookingRouter);
 
 // In-memory session store
 const sessions = new Map<string, ChatMessage[]>();

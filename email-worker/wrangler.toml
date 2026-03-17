@@ -1,0 +1,15 @@
+name = "sevenrooms-2fa"
+main = "src/worker.ts"
+compatibility_date = "2024-09-01"
+
+routes = [
+  { pattern = "2fa.chaifamily.com.au/*", zone_name = "chaifamily.com.au" }
+]
+
+[[kv_namespaces]]
+binding = "CODES"
+id = "b3b43f84042444d69d11fa93798efe85"
+
+[vars]
+FORWARD_TO = "ronn.chaifamily@gmail.com"
+
