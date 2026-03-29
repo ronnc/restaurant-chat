@@ -5,6 +5,8 @@
 #   ./start.sh --local                      → use local Ollama instead of remote
 #   ./start.sh --local llama3.2:3b          → local Ollama with custom model
 #   ./start.sh llama3.2:3b                  → override model (auto-detect provider)
+#   ./start.sh sonnet                       → Claude Sonnet (Anthropic)
+#   ./start.sh haiku                        → Claude Haiku (Anthropic)
 #   ./start.sh claude-sonnet-4-20250514              → auto-picks Anthropic
 #   ./start.sh gpt-4o openai                → explicit provider
 cd "$(dirname "$0")"
@@ -24,6 +26,12 @@ for arg in "$@"; do
     ARGS+=("$arg")
   fi
 done
+
+# Resolve shorthand aliases
+case "${ARGS[0]}" in
+  sonnet)  ARGS[0]="claude-sonnet-4-5-20241022"; ARGS[1]="${ARGS[1]:-anthropic}" ;;
+  haiku)   ARGS[0]="claude-haiku-4-5-20251001"; ARGS[1]="${ARGS[1]:-anthropic}" ;;
+esac
 
 # Allow model + provider override via CLI args
 if [ -n "${ARGS[0]}" ]; then
@@ -50,7 +58,7 @@ if [ "$USE_LOCAL" = true ]; then
   echo "Preloading ${LLM_MODEL} into memory..."
   curl -s http://localhost:11434/api/generate -d "{\"model\":\"${LLM_MODEL}\",\"keep_alive\":-1}" > /dev/null
 else
-  export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://192.168.0.30:11434/v1}"
+  export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434/v1}"
 fi
 export LLM_MODEL="${LLM_MODEL:-llama3.1:8b}"
 export RESTAURANT="${RESTAURANT:-delhi-darbar}"
