@@ -6,3 +6,8 @@ tunnel.log
 server.pid
 tunnel.pid
 transcripts/
+sevenrooms-cookies.json
+debug-*.png
+debug-*.html
+login-script-analysis.js
+.DS_Store

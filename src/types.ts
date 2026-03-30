@@ -54,6 +54,12 @@ export interface ChatResponse {
     phone: string;
     specialRequests: string;
   };
+  /** Present when a live availability lookup ran (SevenRooms). */
+  availabilityLookup?: {
+    date: string;
+    partySize: number;
+    slotCount: number;
+  };
 }
 
 export interface BookRequest {

@@ -14,75 +14,73 @@ export class OpenTableProvider extends BookingProvider {
       await page.waitForLoadState('networkidle', { timeout: 15000 });
 
       // 1. Party size
-      const partyPicker = page.locator(
-        'select[data-test="select-party-size"], select#covers, [aria-label*="party size"] select'
-      ).first();
-      if ((await partyPicker.count()) > 0) {
-        await partyPicker.selectOption(String(details.partySize));
-      } else {
-        const partyBtn = page.locator(`button[data-party-size="${details.partySize}"]`).first();
-        if ((await partyBtn.count()) > 0) await partyBtn.click();
+      const partySet = await this.selectByLabel(
+        page,
+        [/party\s*size/i, /guests?/i, /people/i, /diners?/i, /covers?/i],
+        ['select[data-test="select-party-size"]', 'select#covers'],
+        String(details.partySize),
+      );
+      if (!partySet) {
+        const btn = page.locator(`button[data-party-size="${details.partySize}"]`).first();
+        if ((await btn.count()) > 0) await btn.click();
       }
 
       // 2. Date
-      const dateInput = page.locator(
-        'input[data-test="date-picker"], input[type="date"], input[aria-label*="Date"]'
-      ).first();
-      if ((await dateInput.count()) > 0) {
-        await dateInput.click();
-        await dateInput.fill(details.date);
-      }
+      await this.fillByLabel(
+        page,
+        [/date/i, /when/i],
+        ['input[data-test="date-picker"]', 'input[type="date"]'],
+        details.date,
+      );
 
       // 3. Time
-      const timePicker = page.locator(
-        'select[data-test="time-picker"], select#time, [aria-label*="Time"] select'
-      ).first();
-      if ((await timePicker.count()) > 0) {
-        await timePicker.selectOption(details.time);
-      }
+      await this.selectByLabel(
+        page,
+        [/time/i],
+        ['select[data-test="time-picker"]', 'select#time'],
+        details.time,
+      );
 
       // 4. Find a table
-      const findBtn = page.locator(
-        'button:has-text("Find"), button:has-text("Search"), button[data-test="find-a-table"]'
-      ).first();
-      if ((await findBtn.count()) > 0) {
-        await findBtn.click();
-        await page.waitForLoadState('networkidle', { timeout: 10000 });
-      }
+      await this.clickButton(
+        page,
+        [/find\s*a?\s*table/i, /find/i, /search/i],
+        ['button[data-test="find-a-table"]'],
+      );
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
       // 5. Pick time slot
-      const slot = page.locator(
-        `button:has-text("${details.time}"), [data-time="${details.time}"]`
-      ).first();
+      const slot = page.getByRole('button', { name: details.time });
       if ((await slot.count()) > 0) {
-        await slot.click();
-        await page.waitForLoadState('networkidle', { timeout: 10000 });
+        await slot.first().click();
+        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
       }
 
       // 6. Fill diner info
       const [firstName, ...lastParts] = details.name.split(' ');
       const lastName = lastParts.join(' ') || details.name;
-      await this.fillField(page, 'input[name="firstName"], input[data-test="first-name"]', firstName);
-      await this.fillField(page, 'input[name="lastName"], input[data-test="last-name"]', lastName);
-      await this.fillField(page, 'input[name="email"], input[data-test="email"]', details.email);
-      await this.fillField(page, 'input[name="phone"], input[data-test="phone-number"]', details.phone);
+
+      await this.fillByLabel(page, [/first\s*name/i], ['input[name="firstName"]', 'input[data-test="first-name"]'], firstName);
+      await this.fillByLabel(page, [/last\s*name/i, /surname/i], ['input[name="lastName"]', 'input[data-test="last-name"]'], lastName);
+      await this.fillByLabel(page, [/email/i], ['input[name="email"]', 'input[data-test="email"]'], details.email);
+      await this.fillByLabel(page, [/phone/i, /mobile/i], ['input[name="phone"]', 'input[data-test="phone-number"]'], details.phone);
 
       if (details.specialRequests) {
-        await this.fillField(
+        await this.fillByLabel(
           page,
-          'textarea[name="specialRequest"], textarea[data-test="special-request"]',
-          details.specialRequests
+          [/special\s*request/i, /note/i, /occasion/i],
+          ['textarea[name="specialRequest"]', 'textarea[data-test="special-request"]'],
+          details.specialRequests,
         );
       }
 
       // 7. Complete reservation
-      const completeBtn = page.locator(
-        'button:has-text("Complete"), button:has-text("Confirm"), button[data-test="complete-reservation"]'
-      ).first();
-      if ((await completeBtn.count()) > 0) {
-        await completeBtn.click();
-        await page.waitForLoadState('networkidle', { timeout: 15000 });
-      }
+      await this.clickButton(
+        page,
+        [/complete\s*reserv/i, /confirm/i],
+        ['button[data-test="complete-reservation"]'],
+      );
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
       // 8. Extract confirmation
       const confirmation = await this.extractConfirmation(page);

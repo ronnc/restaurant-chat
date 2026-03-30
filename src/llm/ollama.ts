@@ -10,7 +10,7 @@ export class OllamaProvider implements LLMProvider {
   constructor(config: ProviderConfig) {
     this.model = config.model;
     this.client = new OpenAI({
-      baseURL: config.baseUrl || process.env.OLLAMA_BASE_URL || 'http://192.168.0.30:11434/v1',
+      baseURL: config.baseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1',
       apiKey: config.apiKey || 'ollama',
     });
   }
