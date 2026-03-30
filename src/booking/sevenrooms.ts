@@ -837,7 +837,13 @@ export class SevenRoomsAutomation {
       const isChecked = await accessRulesToggle.isChecked().catch(() => true);
       if (!isChecked) {
         log('Enabling "Show Access Rules" toggle...');
-        await accessRulesToggle.check();
+        // Use click on the label/parent since the checkbox may be a custom toggle
+        const label = page.locator('label:has([name="toggle-show-access-rules"])').first();
+        if (await label.isVisible({ timeout: 1000 }).catch(() => false)) {
+          await label.click();
+        } else {
+          await accessRulesToggle.click({ force: true });
+        }
         await page.waitForTimeout(1000);
         log('Access rules toggle enabled');
       }
