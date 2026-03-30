@@ -832,20 +832,26 @@ export class SevenRoomsAutomation {
     await this.setPartySize(page, req.partySize);
 
     // Ensure "Show Access Rules" toggle is enabled
-    const accessRulesToggle = page.locator('[name="toggle-show-access-rules"]').first();
-    if (await accessRulesToggle.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const isChecked = await accessRulesToggle.isChecked().catch(() => true);
+    // The toggle is a custom slider — click the text label or the slider track
+    const toggleText = page.locator('text="Show Access Rules"').first();
+    if (await toggleText.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const checkbox = page.locator('[name="toggle-show-access-rules"]').first();
+      const isChecked = await checkbox.isChecked().catch(() => false);
       if (!isChecked) {
         log('Enabling "Show Access Rules" toggle...');
-        // Use click on the label/parent since the checkbox may be a custom toggle
-        const label = page.locator('label:has([name="toggle-show-access-rules"])').first();
-        if (await label.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await label.click();
-        } else {
-          await accessRulesToggle.click({ force: true });
+        await toggleText.click();
+        await page.waitForTimeout(2000); // Wait for slots to reload
+        // Verify it's now checked
+        const nowChecked = await checkbox.isChecked().catch(() => false);
+        log(`Access rules toggle ${nowChecked ? 'enabled' : 'click may have failed, retrying...'}`);
+        if (!nowChecked) {
+          // Try clicking the slider track directly
+          const slider = page.locator('[name="toggle-show-access-rules"] + *, [name="toggle-show-access-rules"] ~ *').first();
+          await slider.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(2000);
         }
-        await page.waitForTimeout(1000);
-        log('Access rules toggle enabled');
+      } else {
+        log('Access rules toggle already enabled');
       }
     }
 
