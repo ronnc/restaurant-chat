@@ -1140,10 +1140,27 @@ export class SevenRoomsAutomation {
       const timeEl = page.locator('[data-test="sr-label-reservation_time"]').first();
       details.time = await timeEl.textContent({ timeout: 2000 }).then(t => t?.trim()).catch(() => req.time);
 
-      // Party size
-      const partySizeEl = page.locator('[data-test="sr-label-party_size"]').first();
-      const partySizeText = await partySizeEl.textContent({ timeout: 2000 }).catch(() => '');
-      details.partySize = partySizeText ? parseInt(partySizeText.trim(), 10) || req.partySize : req.partySize;
+      // Party size - find the selected choice within the party size selector
+      const partySizeContainer = page.locator('[data-test="sr-select-party_size"]').first();
+      let partySizeFound = false;
+      if (await partySizeContainer.isVisible({ timeout: 2000 }).catch(() => false)) {
+        // Look for the active/selected sr-choice-N button
+        const selectedChoice = partySizeContainer.locator('[data-test^="sr-choice-"][aria-pressed="true"], [data-test^="sr-choice-"].active, [data-test^="sr-choice-"][class*="selected"]').first();
+        const choiceAttr = await selectedChoice.getAttribute('data-test', { timeout: 2000 }).catch(() => '');
+        if (choiceAttr) {
+          const sizeMatch = choiceAttr.match(/sr-choice-(\d+)/);
+          if (sizeMatch) {
+            details.partySize = parseInt(sizeMatch[1], 10);
+            partySizeFound = true;
+          }
+        }
+      }
+      if (!partySizeFound) {
+        // Fallback to label
+        const partySizeEl = page.locator('[data-test="sr-label-party_size"]').first();
+        const partySizeText = await partySizeEl.textContent({ timeout: 2000 }).catch(() => '');
+        details.partySize = partySizeText ? parseInt(partySizeText.trim(), 10) || req.partySize : req.partySize;
+      }
 
       // Contact section - phone and email
       const contactSection = page.locator('[data-test="sr-section-contact"]').first();
