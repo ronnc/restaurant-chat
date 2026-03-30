@@ -859,32 +859,60 @@ export class SevenRoomsAutomation {
     log('Waiting for slots to load...');
     await page.waitForTimeout(3000);
     
-    // Click the sr-timeslot-bookable div to SELECT the time slot
+    // Click the time slot to SELECT it
     log(`Selecting time slot ${req.time}`);
     
-    // Find the bookable slot with the matching time and click it
-    const bookableSlots = await page.locator('[data-test="sr-timeslot"].sr-timeslot-bookable').all();
-    log(`Found ${bookableSlots.length} bookable slots`);
-    
+    // When "Show Access Rules" is enabled, there are two columns:
+    //   Left: availability slots (sr-timeslot with pacing info)  
+    //   Right: access rule slots (sr-access-timeslot or similar) — these are the ones to click
+    // Try access rule slots first, then fall back to regular slots
+    const slotSelectors = [
+      '[data-test="sr-access-timeslot"]',
+      '[data-test="sr-timeslot"].sr-timeslot-bookable',
+      '[data-test="sr-timeslot"]',
+    ];
+
     let slotClicked = false;
-    for (const slotEl of bookableSlots) {
-      try {
-        const timeEl = slotEl.locator('[data-test="sr-timeslot_time"]');
-        const slotTime = await timeEl.textContent();
-        
-        if (slotTime?.trim() === req.time) {
-          log(`Found sr-timeslot for ${req.time}, clicking...`);
-          // Click with force to bypass any overlays
-          await slotEl.click({ force: true });
-          log(`✅ Clicked sr-timeslot for ${req.time}`);
-          slotClicked = true;
-          break;
+    for (const slotSelector of slotSelectors) {
+      if (slotClicked) break;
+      const slots = await page.locator(slotSelector).all();
+      if (slots.length === 0) continue;
+      log(`Trying ${slotSelector}: found ${slots.length} slots`);
+      
+      for (const slotEl of slots) {
+        try {
+          // Look for time text in the slot
+          const timeEl = slotEl.locator('[data-test="sr-timeslot_time"], [data-test="sr-access-timeslot_time"]').first();
+          let slotTime = await timeEl.textContent({ timeout: 500 }).catch(() => null);
+          // Fallback: get text content of the slot itself
+          if (!slotTime) {
+            slotTime = await slotEl.textContent({ timeout: 500 }).catch(() => '');
+          }
+          
+          if (slotTime?.trim() === req.time || slotTime?.trim().startsWith(req.time)) {
+            log(`Found slot for ${req.time} via ${slotSelector}, clicking...`);
+            await slotEl.click();
+            log(`✅ Clicked slot for ${req.time}`);
+            slotClicked = true;
+            break;
+          }
+        } catch (e) {
+          // Continue to next slot
         }
-      } catch (e) {
-        log(`Failed to check/click slot: ${e}`);
       }
     }
     
+    if (!slotClicked) {
+      // Last resort: find any element with the exact time text and click it
+      const timeTextEl = page.locator(`text="${req.time}"`).last(); // .last() to prefer right column
+      if (await timeTextEl.isVisible({ timeout: 2000 }).catch(() => false)) {
+        log(`Clicking time text "${req.time}" directly (last match)...`);
+        await timeTextEl.click();
+        log(`✅ Clicked time text for ${req.time}`);
+        slotClicked = true;
+      }
+    }
+
     if (!slotClicked) {
       log(`Could not find bookable slot for ${req.time}`);
       return { success: false, message: `Time slot ${req.time} not found` };
