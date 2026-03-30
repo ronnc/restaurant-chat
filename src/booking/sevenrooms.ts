@@ -56,6 +56,16 @@ export interface BookingResult {
   success: boolean;
   reservationId?: string;
   message: string;
+  details?: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    email?: string;
+    date?: string;
+    time?: string;
+    partySize?: number;
+    venue?: string;
+  };
 }
 
 export interface ReservationStatus {
@@ -1113,10 +1123,75 @@ export class SevenRoomsAutomation {
       return { success: false, message: `Booking failed: ${errorText.trim()}` };
     }
 
+    // Extract booking details from the reservation slideout using data-test selectors
+    const details: BookingResult['details'] = {};
+    try {
+      await page.waitForTimeout(2000);
+
+      // Venue
+      const venueEl = page.locator('[data-test="sr-label-venue_name"]').first();
+      details.venue = await venueEl.textContent({ timeout: 2000 }).then(t => t?.trim()).catch(() => undefined);
+
+      // Date
+      const dateEl = page.locator('[data-test="sr-label-reservation_date"]').first();
+      details.date = await dateEl.textContent({ timeout: 2000 }).then(t => t?.trim()).catch(() => req.date);
+
+      // Time
+      const timeEl = page.locator('[data-test="sr-label-reservation_time"]').first();
+      details.time = await timeEl.textContent({ timeout: 2000 }).then(t => t?.trim()).catch(() => req.time);
+
+      // Party size
+      const partySizeEl = page.locator('[data-test="sr-label-party_size"]').first();
+      const partySizeText = await partySizeEl.textContent({ timeout: 2000 }).catch(() => '');
+      details.partySize = partySizeText ? parseInt(partySizeText.trim(), 10) || req.partySize : req.partySize;
+
+      // Contact section - phone and email
+      const contactSection = page.locator('[data-test="sr-section-contact"]').first();
+      if (await contactSection.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const contactText = await contactSection.textContent().catch(() => '');
+        // Extract phone
+        const phoneMatch = contactText?.match(/PHONE\s*([\d\s+]+)/i);
+        if (phoneMatch) details.phone = phoneMatch[1].trim();
+        // Extract email
+        const emailMatch = contactText?.match(/EMAIL\s*([\w.+-]+@[\w.-]+\.\w+)/i);
+        if (emailMatch) details.email = emailMatch[1];
+      }
+
+      // Guest name from the slideout header
+      const slideoutTitle = page.locator('[data-test="sr-slideout-title"]').first();
+      const titleText = await slideoutTitle.textContent().catch(() => '');
+      // After the title, the guest name appears in the header area
+      // Try to get the client name from the slideout
+      const clientNameEl = page.locator('[data-test="sr-client-name"], [data-test="sr-label-client_name"]').first();
+      const clientName = await clientNameEl.textContent({ timeout: 2000 }).catch(() => '');
+      if (clientName && clientName.trim()) {
+        const parts = clientName.trim().split(/\s+/);
+        details.firstName = parts[0];
+        details.lastName = parts.slice(1).join(' ') || undefined;
+      }
+
+      // Fallback: use the name from the request
+      if (!details.firstName) {
+        const parts = req.name.split(/\s+/);
+        details.firstName = parts[0];
+        details.lastName = parts.slice(1).join(' ') || undefined;
+      }
+
+      await page.screenshot({ path: 'debug-08-reservation-detail.png', fullPage: true });
+      log(`Extracted booking details: ${JSON.stringify(details)}`);
+    } catch (e) {
+      log(`Warning: could not extract all booking details: ${(e as Error).message}`);
+      // Fallback to request data
+      if (!details.date) details.date = req.date;
+      if (!details.time) details.time = req.time;
+      if (!details.partySize) details.partySize = req.partySize;
+    }
+
     log(`Booking created: ${reservationId || 'unknown ID'}`);
     return {
       success: true,
       reservationId,
+      details,
       message: reservationId
         ? `Reservation ${reservationId} created successfully`
         : 'Reservation created (ID not captured)',

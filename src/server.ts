@@ -267,7 +267,18 @@ app.post('/api/chat', async (req, res) => {
             
             if (bookingResult.success) {
               // Add booking confirmation to history
-              const confirmationMsg = `[System] ✅ Booking confirmed! Reservation ID: ${bookingResult.reservationId}. Tell the customer their reservation is confirmed and provide the reservation number.`;
+              const d = bookingResult.details || {};
+              const detailLines = [
+                `Reservation ID: ${bookingResult.reservationId}`,
+                d.firstName || d.lastName ? `Guest: ${[d.firstName, d.lastName].filter(Boolean).join(' ')}` : null,
+                d.venue ? `Venue: ${d.venue}` : null,
+                d.date ? `Date: ${d.date}` : null,
+                d.time ? `Time: ${d.time}` : null,
+                d.partySize ? `Party size: ${d.partySize}` : null,
+                d.phone ? `Phone: ${d.phone}` : null,
+                d.email ? `Email: ${d.email}` : null,
+              ].filter(Boolean).join(', ');
+              const confirmationMsg = `[System] ✅ Booking confirmed! ${detailLines}. Tell the customer their reservation is confirmed and provide the details.`;
               history.push({ role: 'user', content: confirmationMsg });
               
               // Get updated reply with confirmation
