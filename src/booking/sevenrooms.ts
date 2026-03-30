@@ -838,6 +838,18 @@ export class SevenRoomsAutomation {
     await this.setDate(page, req.date);
     await this.setPartySize(page, req.partySize);
 
+    // Ensure "Show Access Rules" toggle is enabled
+    const accessRulesToggle = page.locator('[name="toggle-show-access-rules"]').first();
+    if (await accessRulesToggle.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const isChecked = await accessRulesToggle.isChecked().catch(() => true);
+      if (!isChecked) {
+        log('Enabling "Show Access Rules" toggle...');
+        await accessRulesToggle.check();
+        await page.waitForTimeout(1000);
+        log('Access rules toggle enabled');
+      }
+    }
+
     // Wait for slots to load
     log('Waiting for slots to load...');
     await page.waitForTimeout(3000);
