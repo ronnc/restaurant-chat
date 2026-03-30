@@ -534,39 +534,32 @@ export class SevenRoomsAutomation {
     log(`Navigating to ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
 
-    // Wait for the page to be interactive - don't fail on timeout
-    try {
-      await page.waitForLoadState('networkidle', { timeout: NAV_TIMEOUT });
-    } catch (e) {
-      log('Network idle timeout - continuing anyway');
-    }
-    await page.waitForTimeout(3000);
-
-    // Dismiss Pendo overlay before interacting
-    await this.dismissPendo(page);
-
-    // Take screenshot for debugging
-    await page.screenshot({ path: 'debug-01-reservations-page.png', fullPage: true });
-    log('Screenshot saved: debug-01-reservations-page.png');
-
-    // Look for Add Reservation button with multiple strategies
+    // Wait for Add Reservation button to become clickable (skip slow networkidle)
     const addBtnSelectors = [
-      'button:has-text("Add Reservation")',
       'a:has-text("Add Reservation")',
+      'button:has-text("Add Reservation")',
       '[data-test="add-reservation"]',
-      'button:has-text("Add")',
-      '[class*="add"][class*="reservation"]',
     ];
 
     let clicked = false;
     for (const selector of addBtnSelectors) {
-      const addBtn = page.locator(selector).first();
-      if (await addBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-        log(`Found Add Reservation button: ${selector}`);
+      try {
+        const addBtn = page.locator(selector).first();
+        await addBtn.waitFor({ state: 'visible', timeout: NAV_TIMEOUT });
+        log(`Add Reservation button ready: ${selector}`);
+
+        // Dismiss Pendo overlay before clicking
+        await this.dismissPendo(page);
+
+        await page.screenshot({ path: 'debug-01-reservations-page.png', fullPage: true });
+        log('Screenshot saved: debug-01-reservations-page.png');
+
         await addBtn.click();
         await page.waitForTimeout(2000); // Wait for panel animation
         clicked = true;
         break;
+      } catch (e) {
+        // Try next selector
       }
     }
 
