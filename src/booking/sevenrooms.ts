@@ -826,6 +826,9 @@ export class SevenRoomsAutomation {
    * Create a booking/reservation.
    */
   async createBooking(req: BookingRequest): Promise<BookingResult> {
+    // Always use a fresh browser for each booking to avoid stale page state
+    await this.close();
+    try {
     const page = await this.ensureLoggedIn();
     await this.navigateToAddReservation(page, req.date);
     await this.setDate(page, req.date);
@@ -1115,68 +1118,52 @@ export class SevenRoomsAutomation {
       
       // Try the slideout title first (most reliable)
       const slideoutTitle = page.locator('[data-test="sr-slideout-title"]').first();
-      const titleText = await slideoutTitle.textContent().catch(() => '');
+      const titleText = await slideoutTitle.textContent({ timeout: 3000 }).catch(() => '');
       if (titleText) {
         log(`Slideout title text: "${titleText}"`);
-        // Format: "Reservation <id>"
         const match = titleText.match(/Reservation\s+([A-Za-z0-9_-]+)/i);
         if (match && match[1] && match[1].toLowerCase() !== 'day') {
           reservationId = match[1];
           log(`Found reservation ID in slideout title: ${reservationId}`);
         }
       }
+    }
+
+    // Only do expensive fallback searches if we still don't have an ID
+    if (!reservationId) {
+      const selectors = [
+        '[class*="confirmation"]',
+        '[class*="success"]',
+        '[data-test*="confirmation"]',
+        '[class*="reservation"][class*="id"]',
+      ];
       
-      // Fallback: Try to find reservation confirmation number in various places
-      if (!reservationId) {
-        const selectors = [
-          '[class*="confirmation"]',
-          '[class*="success"]',
-          '[data-test*="confirmation"]',
-          '[class*="reservation"][class*="id"]',
-          'h1, h2, h3, h4',
-          '.modal-title',
-          '[role="dialog"] h2',
-        ];
-        
-        for (const selector of selectors) {
-          const el = page.locator(selector).first();
-          const text = await el.textContent().catch(() => '');
-          if (text) {
-            // Look for patterns like "Confirmation #123", "Reservation ID: ABC", etc.
-            const patterns = [
-              /(?:confirmation|reservation)\s*(?:#|id|number)?[:\s]+([A-Za-z0-9_-]+)/i,
-              /#([A-Za-z0-9_-]{6,})/,
-              /\b([A-Z0-9]{8,})\b/,
-            ];
-            
-            for (const pattern of patterns) {
-              const match = text.match(pattern);
-              if (match && match[1] && match[1].toLowerCase() !== 'day') {
-                reservationId = match[1];
-                log(`Found reservation ID in page text: ${reservationId} (selector: ${selector})`);
-                break;
-              }
-            }
-            if (reservationId) break;
+      for (const selector of selectors) {
+        const el = page.locator(selector).first();
+        const text = await el.textContent({ timeout: 1000 }).catch(() => '');
+        if (text) {
+          const match = text.match(/(?:confirmation|reservation)\s*(?:#|id|number)?[:\s]+([A-Za-z0-9_-]+)/i);
+          if (match && match[1] && match[1].toLowerCase() !== 'day') {
+            reservationId = match[1];
+            log(`Found reservation ID in page text: ${reservationId} (selector: ${selector})`);
+            break;
           }
         }
       }
     }
 
-    // Check for error messages
+    // Quick error check (don't wait long)
     const errorEl = page.locator(
       '.error, .alert-danger, [class*="error"], [role="alert"]'
     ).first();
-    const errorText = await errorEl.textContent().catch(() => '');
+    const errorText = await errorEl.textContent({ timeout: 1000 }).catch(() => '');
     if (errorText && errorText.toLowerCase().includes('error')) {
       return { success: false, message: `Booking failed: ${errorText.trim()}` };
     }
 
-    // Extract booking details from the reservation slideout using data-test selectors
+    // Extract booking details — skip the long wait, data should already be rendered
     const details: BookingResult['details'] = {};
     try {
-      await page.waitForTimeout(2000);
-
       // Venue
       const venueEl = page.locator('[data-test="sr-label-venue_name"]').first();
       details.venue = await venueEl.textContent({ timeout: 2000 }).then(t => t?.trim()).catch(() => undefined);
@@ -1245,6 +1232,10 @@ export class SevenRoomsAutomation {
         ? `Reservation ${reservationId} created successfully`
         : 'Reservation created (ID not captured)',
     };
+    } finally {
+      // Always close browser after booking attempt (success or failure)
+      await this.close().catch(e => log(`close error: ${(e as Error).message}`));
+    }
   }
 
   /**
@@ -1298,8 +1289,88 @@ export class SevenRoomsAutomation {
     return checkCookieHealth();
   }
 
+  /**
+   * Hit the SevenRooms manager page to keep the session cookie alive.
+   * Call this periodically in the background to prevent cookie expiry.
+   */
+  async keepAlive(): Promise<boolean> {
+    try {
+      const page = await this.ensureBrowser();
+      if (!this.loggedIn) {
+        log('[keepalive] Not logged in, skipping');
+        return false;
+      }
+
+      // Navigate to a lightweight manager page
+      log('[keepalive] Pinging SevenRooms...');
+      const resp = await page.goto(MANAGER_BASE, {
+        waitUntil: 'domcontentloaded',
+        timeout: NAV_TIMEOUT,
+      });
+
+      await page.waitForTimeout(1000 + Math.random() * 2000);
+
+      const url = page.url();
+      if (url.includes('/manager/')) {
+        log('[keepalive] ✅ Session alive');
+        // Re-save cookies with updated expiry
+        if (this.context) {
+          const cookies = await this.context.cookies();
+          saveCookies(cookies);
+          log(`[keepalive] Re-saved ${cookies.length} cookies`);
+        }
+        return true;
+      } else {
+        log(`[keepalive] ⚠️ Redirected to ${url} — session may be expired`);
+        this.loggedIn = false;
+        return false;
+      }
+    } catch (e) {
+      log(`[keepalive] Error: ${(e as Error).message}`);
+      return false;
+    }
+  }
+
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Start a background keepalive loop that pings SevenRooms at random intervals.
+   * @param minMinutes Minimum interval in minutes (default 15)
+   * @param maxMinutes Maximum interval in minutes (default 45)
+   */
+  startKeepAlive(minMinutes = 15, maxMinutes = 45): void {
+    if (this.keepAliveTimer) {
+      log('[keepalive] Already running');
+      return;
+    }
+
+    const scheduleNext = () => {
+      const delayMs = (minMinutes + Math.random() * (maxMinutes - minMinutes)) * 60 * 1000;
+      const delayMin = Math.round(delayMs / 60000);
+      log(`[keepalive] Next ping in ~${delayMin} minutes`);
+
+      this.keepAliveTimer = setTimeout(async () => {
+        await this.keepAlive();
+        scheduleNext();
+      }, delayMs);
+    };
+
+    log(`[keepalive] Starting background keepalive (${minMinutes}-${maxMinutes} min intervals)`);
+    scheduleNext();
+  }
+
+  /** Stop the background keepalive loop. */
+  stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearTimeout(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+      log('[keepalive] Stopped');
+    }
+  }
+
   /** Clean up browser resources. */
   async close(): Promise<void> {
+    this.stopKeepAlive();
     log('Closing browser...');
     if (this.page) await this.page.close().catch(() => {});
     if (this.context) await this.context.close().catch(() => {});

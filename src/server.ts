@@ -477,4 +477,9 @@ app.listen(PORT, () => {
   if (restaurant) {
     console.log(`   Restaurant: ${restaurant.name}`);
   }
+
+  // Start SevenRooms cookie keepalive (random interval 15-45 min)
+  if (process.env.SEVENROOMS_EMAIL) {
+    getSevenRooms().startKeepAlive(15, 45);
+  }
 });
