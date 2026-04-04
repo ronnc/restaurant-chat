@@ -1,4 +1,4 @@
-# Delhi Darbar — Menu
+# My Delhi — Menu
 
 ## 🍢 Itty Bitty Nibbles
 

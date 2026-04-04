@@ -1,4 +1,4 @@
-# Delhi Darbar — Allergen Information & Dietary Guide (Dec 2025)
+# My Delhi — Allergen Information & Dietary Guide (Dec 2025)
 
 Columns: Vegetarian (V), Vegan (VG), Gluten (GL), Dairy (D), Celery (CE), Crustaceans (CR), Eggs (E), Fish (F), Lupin (L), Mollusc (MO), Mustard (MU), Nuts (N), Peanuts (P), Sesame (SE), Soya (SO), Sulphites (SU)
 

@@ -8,6 +8,7 @@ export interface RestaurantConfig {
   emoji?: string;
   cuisine?: string;
   currency?: string;
+  place_id?: string;
   knowledge?: string;
 }
 

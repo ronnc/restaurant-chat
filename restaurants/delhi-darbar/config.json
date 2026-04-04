@@ -1,7 +1,8 @@
 {
-  "name": "Delhi Darbar",
-  "tagline": "Authentic North Indian cuisine in the heart of Melbourne",
-  "emoji": "🏛️",
+  "name": "My Delhi",
+  "tagline": "Authentic North Indian cuisine in the heart of Sunderland",
+  "emoji": "🍛",
   "cuisine": "North Indian",
-  "currency": "AUD"
+  "currency": "GBP",
+  "place_id": "ChIJ53l5R4NnfkgRpNFobUIfIF8"
 }

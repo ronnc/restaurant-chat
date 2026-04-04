@@ -7,6 +7,7 @@ import { loadRestaurant } from './restaurant.js';
 import { ProviderFactory } from './llm/index.js';
 import type { ChatMessage, ChatRequest, ChatResponse, BookRequest, RestaurantConfig } from './types.js';
 import { bookingRouter, getSevenRooms } from './booking/index.js';
+import { getPlaceDetails, getPlacePhotos } from './google-places.js';
 import type { TimeSlot } from './booking/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,6 +110,27 @@ IMPORTANT: Only output the JSON block when you have ALL required fields (date, t
 
 If a customer asks something unrelated to ordering food or making reservations, politely redirect them.`;
 
+  // Google Places tools (only if place_id is configured)
+  if (restaurant?.place_id) {
+    prompt += `
+
+## Google Places info
+When the customer asks about the restaurant's address, location, opening hours, ratings, reviews, or wants to see photos:
+
+- For details/reviews, output:
+\`\`\`json
+{"action":"place_details","include_reviews":true}
+\`\`\`
+Set include_reviews to false if they only asked about hours/address (not reviews).
+
+- For photos, output:
+\`\`\`json
+{"action":"place_photos","max_photos":5}
+\`\`\`
+
+The system will fetch live data from Google and you'll get the result to summarise naturally.`;
+  }
+
   return prompt;
 }
 
@@ -116,6 +138,12 @@ const SYSTEM_PROMPT = buildSystemPrompt();
 
 const AVAILABILITY_JSON_RE =
   /```json\s*(\{[\s\S]*?"action"\s*:\s*"availability"[\s\S]*?\})\s*```/;
+
+const PLACE_DETAILS_JSON_RE =
+  /```json\s*(\{[\s\S]*?"action"\s*:\s*"place_details"[\s\S]*?\})\s*```/;
+
+const PLACE_PHOTOS_JSON_RE =
+  /```json\s*(\{[\s\S]*?"action"\s*:\s*"place_photos"[\s\S]*?\})\s*```/;
 
 function formatSlotsForPrompt(slots: TimeSlot[]): string {
   if (slots.length === 0) {
@@ -216,6 +244,47 @@ app.post('/api/chat', async (req, res) => {
     } else {
       history.push({ role: 'assistant', content: reply });
       logTranscript(sessionId, 'assistant', reply);
+    }
+
+    // --- Google Places: place_details ---
+    const placeDetailsMatch = reply.match(PLACE_DETAILS_JSON_RE);
+    if (placeDetailsMatch && restaurant?.place_id) {
+      try {
+        const payload = JSON.parse(placeDetailsMatch[1]) as { action?: string; include_reviews?: boolean };
+        if (payload.action === 'place_details') {
+          // Ensure assistant message is in history (may already be there from availability path)
+          if (history[history.length - 1]?.content !== reply) {
+            history.push({ role: 'assistant', content: reply });
+          }
+          const result = await getPlaceDetails(restaurant.place_id, payload.include_reviews ?? true);
+          history.push({ role: 'user', content: `[Google Places data for our restaurant:\n${result}\n\nSummarise this naturally for the customer. Do not repeat raw data verbatim.]` });
+          reply = (await provider.chat(history, SYSTEM_PROMPT)) || 'Sorry, I could not generate a response.';
+          history.push({ role: 'assistant', content: reply });
+          logTranscript(sessionId, 'assistant', reply);
+        }
+      } catch (e) {
+        console.error('[chat] place_details parse/fetch failed:', e);
+      }
+    }
+
+    // --- Google Places: place_photos ---
+    const placePhotosMatch = reply.match(PLACE_PHOTOS_JSON_RE);
+    if (placePhotosMatch && restaurant?.place_id) {
+      try {
+        const payload = JSON.parse(placePhotosMatch[1]) as { action?: string; max_photos?: number };
+        if (payload.action === 'place_photos') {
+          if (history[history.length - 1]?.content !== reply) {
+            history.push({ role: 'assistant', content: reply });
+          }
+          const result = await getPlacePhotos(restaurant.place_id, payload.max_photos ?? 5);
+          history.push({ role: 'user', content: `[Google Places photos for our restaurant:\n${result}\n\nShare these photo links with the customer in a friendly way.]` });
+          reply = (await provider.chat(history, SYSTEM_PROMPT)) || 'Sorry, I could not generate a response.';
+          history.push({ role: 'assistant', content: reply });
+          logTranscript(sessionId, 'assistant', reply);
+        }
+      } catch (e) {
+        console.error('[chat] place_photos parse/fetch failed:', e);
+      }
     }
 
     // Check if the reply contains a booking action and execute it

@@ -77,6 +77,12 @@
     .msg.assistant th { background: #f5f5f5; font-weight: 600; }
     .msg.assistant p { margin: 4px 0; }
     .msg.assistant hr { border: none; border-top: 1px solid #ddd; margin: 8px 0; }
+    .msg.assistant img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 6px 0;
+      display: block;
+    }
     .msg.typing {
       align-self: flex-start;
       background: white;
@@ -120,10 +126,10 @@
 </head>
 <body>
   <header>
-    <span>🏛️</span> Delhi Darbar — Order Chat
+    <span>🍛</span> My Delhi — Chat
   </header>
   <div id="messages">
-    <div class="msg assistant">Namaste! 🙏 Welcome to Delhi Darbar! What can I get for you today? 😊</div>
+    <div class="msg assistant">Namaste! 🙏 Welcome to My Delhi! What can I get for you today? 😊</div>
   </div>
   <div id="input-area">
     <input id="input" type="text" placeholder="Type your order..." autocomplete="off" />
