@@ -57,5 +57,4 @@ export class ToolRegistry {
   }
 }
 
-// Singleton instance for easy access across the application
 export const registry = new ToolRegistry();

@@ -71,11 +71,8 @@ export class LLMClient {
  * Test Suite: Demonstrating the decoupled architecture and error resilience.
  */
 async function runTest() {
-  console.log("🚀 Starting Integrated LLMClient Test...");
+  console.log("     Starting Integrated LLMClient Test...");
 
-  // We use the Ollama provider because it's the most likely to be available locally
-  // during this engineering session.
-  const ollama = new OllamaProvider("http://localhost:11400", "llama3"); 
 
   const agent = new LLMClient(ollama, "You are a restaurant assistant.");
   
