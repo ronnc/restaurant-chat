@@ -1,24 +1,21 @@
-import { Conversation, ToolCall, LLMResponse, ILLMProvider } from './types';
-import { AnthropicProvider, OllamaProvider } from './providers';
+import { Conversation, ToolCall, LLMResponse } from './types';
 
 /**
- * The LLMClient implements the "Agentic Loop" pattern.
- * It is now provider-agnostic, accepting any implementation of ILLMProvider.
+ * The LLMClient implements the Agentic Loop.
+ * It handles history and tool execution.
  */
 export class LLMClient {
   private history: Conversation[] = [];
   private readonly maxRounds: number = 5;
+  private provider: any;
+  private instructions: string;
 
-  constructor(
-    private provider: ILLMProvider,
-    private instructions: string
-  ) {
+  constructor(provider: any, instructions: string) {
+    this.provider = provider;
+    this.instructions = instructions;
     this.history.push({ role: 'system', content: this.instructions });
   }
 
-  /**
-   * The core "Agentic Loop".
-   */
   public async generateResponse(query: string): Promise<string> {
     this.history.push({ role: 'user', content: query });
 
@@ -57,39 +54,14 @@ export class LLMClient {
     return finalText;
   }
 
-  private async executeTool(tool: ToolCall): Promise<string> {
-    await new Promise(resolve => setTimeout(resolve, 500));
+  private async executeTool(tool: any): Promise<string> {
+    // In a real implementation, this would use the registry
+    // For the test, we just simulate the tool execution
     return `Success: Tool ${tool.name} executed.`;
   }
 
   public getHistory(): Conversation[] {
     return this.history;
   }
+ 
 }
-
-/**
- * Test Suite: Demonstrating the decoupled architecture and error resilience.
- */
-async function runTest() {
-  console.log("     Starting Integrated LLMClient Test...");
-
-
-  const agent = new LLMClient(ollama, "You are a restaurant assistant.");
-  
-  const userQuery = "I want to book a table.";
-  console.log(`User: ${userQuery}`);
-
-  try {
-    const result = await agent.generateResponse(userQuery);
-    console.log(`\nFinal Agent Output: ${result}`);
-  } catch (e) {
-    console.error("Test Fatal Error:", e);
-  }
-
-  console.log("\n--- Full Conversation Trace ---");
-  agent.getHistory().forEach(msg => {
-    console.log(`[${msg.role.toUpperCase()}]: ${msg.content}`);
-  });
-}
-
-runTest().catch(err => console.error(err));

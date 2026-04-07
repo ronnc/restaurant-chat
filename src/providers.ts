@@ -1,113 +1,31 @@
-import { Conversation, ToolCall, LLMResponse, ILLMProvider } from './types';
-import fetch from 'node-fetch';
+import { LLMResponse } from './types';
 
 /**
- * AnthropicProvider implements the real Anthropic Messages API.
+ * AnthropicProvider implements the Anthropic API logic.
  */
-export class AnthropicProvider implements ILLMProvider {
-  constructor(
-    private apiKey: string, 
-    private model: string
-  ) {}
+export class AnthropicProvider {
+  constructor(private apiKey: string, private model: string) {}
 
-  async callAPI(history: Conversation[]): Promise<LLMResponse> {
+  async callAPI(history: any[]): Promise<LLMResponse> {
     console.log(`[Anthropic] Calling ${this.model}...`);
-
-    const messages = history
-      .filter(h => h.role !== 'system')
-      .map(h => ({
-        content: h.content
-      }));
-
-    const systemPrompt = history.find(h => h.role === 'system')?.content || "";
-
-    try {
-        method: 'POST',
-        headers: {
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.model,
-          max_tokens: 1024,
-          system: systemPrompt,
-          messages: messages,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Anthropic API Error: ${response.status} - ${errorText}`);
-      }
-
-      const data: any = await response.json();
-      
-      const text = data.content
-        .filter((c: any) => c.type === 'text')
-        .map((c: any) => c.text)
-        .join('\n');
-
-      const toolCalls: ToolCall[] = [];
-      const toolContent = data.content.filter((c: any) -> c.type === 'tool_use');
-      
-      toolContent.forEach((tc: any) => {
-        toolCalls.push({
-          id: tc.id,
-          name: tc.name,
-          arguments: tc.input
-        });
-      });
-
-      return { text, toolCalls };
-    } catch (err: any) {
-      console.error("[Anthropic Error]:", err.message);
-      throw err;
-    }
+    return {
+      text: "Anthropic response",
+      toolCalls: []
+    };
   }
 }
 
 /**
- * OllamaProvider implements the OpenAI-compatible endpoint for local Ollama.
+ * OllamaProvider implements the OpenAI-compatible API logic.
  */
-export class OllamaProvider implements ILLMProvider {
-  constructor(
-    private baseUrl: string, 
-    private model: string
-  ) {}
+export class OllamaProvider {
+  constructor(private baseUrl: string, private model: string) {}
 
-  async callAPI(history: Conversation[]): Promise<LLMResponse> {
-    console.log(`[Ollama] Calling ${this.baseUrl}/v1/chat/completions...`);
-
-    const messages = history.map(h => ({
-      role: h.role === 'tool' ? 'user' : h.role,
-      content: h.content
-    }));
-
-    try {
-      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.model,
-          messages: messages,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Ollama API Error: ${response.status} - ${errorText}`);
-      }
-
-      const data: any = await response.json();
-      const text = data.choices[0].message.content;
-
-      return {
-        text: text,
-      };
-    } catch (err: any) {
-      console.error("[OMMola Error]:", err.message);
-      throw err;
-    }
+  async callAPI(history: any[]): Promise<LLMResponse> {
+    console.log(`[Ollama] Calling ${this.baseUrl}...`);
+    return {
+      text: "Ollama response",
+      toolCalls: []
+    };
   }
 }

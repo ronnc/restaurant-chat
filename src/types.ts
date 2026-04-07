@@ -1,6 +1,7 @@
+import { Conversation, ToolCall, LLMResponse, BookingResult } from './types';
+
 /**
  * Represents a single turn in the conversation history.
- * Matches the Python `Conversation` model.
  */
 export interface Conversation {
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -9,7 +10,6 @@ export interface Conversation {
 
 /**
  * Represents a structured tool call extracted from an LLM response.
- * This is the "Action" that the Agent loop will execute.
  */
 export interface ToolCall {
   id: string;
@@ -19,7 +19,6 @@ export interface ToolCall {
 
 /**
  * Represents the response payload from an LLM provider.
- * This is what the provider-specific implementation returns to the orchestrator.
  */
 export interface LLMResponse {
   text: string;
@@ -38,7 +37,7 @@ export interface ProviderConfig {
 }
 
 /**
- * The structure of a completed booking, extracted from the agent's tool output.
+ * The structure of a completed booking.
  */
 export interface BookingResult {
   action: 'book';
@@ -49,4 +48,51 @@ export interface BookingResult {
   email: string;
   phone: string;
   specialRequests?: string;
+}
+
+/**
+ * Request structure for the /api/chat endpoint.
+ */
+export interface ChatRequest {
+  sessionId: string;
+  message: string;
+}
+
+/**
+ * Response structure for the /api/chat endpoint.
+ */
+export interface ChatResponse {
+  reply: string;
+  availabilityLookup?: {
+    date: string;
+    partySize: number;
+    slotCount: number;
+  };
+}
+
+/**
+ * Request structure for the /api/book endpoint.
+ */
+export interface BookRequest {
+  bookingUrl: string;
+  date: string;
+  time: string;
+  party_size: number;
+  name: string;
+  email: string;
+  phone: string;
+  specialRequests?: string;
+}
+
+/**
+ * Configuration for the Restaurant.
+ */
+export interface RestaurantConfig {
+  name: string;
+  cuisine?: string;
+  currency?: string;
+  tagline?: string;
+  knowledge?: string;
+  place_id?: string;
+  address?: string;
 }
